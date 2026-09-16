@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -164,13 +166,18 @@ class GanttController extends ChangeNotifier {
     notifyListeners();
   }
 
-  final List<VoidCallback> _fetchListener = <VoidCallback>[];
+  bool _fetchInFlight = false;
+  bool _fetchPending = false;
+
+  final List<FutureOr<void> Function()> _fetchListener =
+      <FutureOr<void> Function()>[];
 
   /// Adds a listener to be called when data needs to be fetched.
-  void addFetchListener(VoidCallback fn) => _fetchListener.add(fn);
+  void addFetchListener(FutureOr<void> Function() fn) => _fetchListener.add(fn);
 
   /// Removes a fetch listener.
-  void removeFetchListener(VoidCallback fn) => _fetchListener.remove(fn);
+  void removeFetchListener(FutureOr<void> Function() fn) =>
+      _fetchListener.remove(fn);
 
   /// Removes all fetch listeners.
   void removeAllFetchListener() {
@@ -180,9 +187,30 @@ class GanttController extends ChangeNotifier {
   }
 
   /// Notifies all fetch listeners to load new data.
+  ///
+  /// If a fetch is already in flight, this does not start a second one in
+  /// parallel — it just marks that another fetch is needed and returns.
+  /// Once the running fetch completes, it immediately re-runs exactly once
+  /// more, picking up whatever changed in the meantime. This guarantees at
+  /// most one fetch in flight at any time, so a slower/older fetch can never
+  /// overwrite a faster/newer one — there is nothing left to race against.
   void fetch() {
+    if (_fetchInFlight) {
+      _fetchPending = true;
+      return;
+    }
+    _runFetch();
+  }
+
+  Future<void> _runFetch() async {
+    _fetchInFlight = true;
     for (var fn in _fetchListener) {
-      fn();
+      await Future.sync(fn);
+    }
+    _fetchInFlight = false;
+    if (_fetchPending) {
+      _fetchPending = false;
+      unawaited(_runFetch());
     }
   }
 

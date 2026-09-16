@@ -1,3 +1,9 @@
+## [1.3.0] - 2026-09-16
+
+@a-nisi-insideapp
+
+- Fix a race between overlapping `fetch()` calls (e.g. the automatic fetch on mount racing a caller's own refetch triggered by async filter restoration): `GanttController` now serializes fetches instead of running them concurrently — at most one fetch is ever in flight, and any `fetch()` call that arrives while one is running is coalesced into a single follow-up run instead of starting a second one. This removes the need for callers to guard against stale responses overwriting fresher ones.
+
 ## [1.2.2] - 2026-04-28
 
 @rickypid
