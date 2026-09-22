@@ -194,20 +194,46 @@ class GanttController extends ChangeNotifier {
   /// more, picking up whatever changed in the meantime. This guarantees at
   /// most one fetch in flight at any time, so a slower/older fetch can never
   /// overwrite a faster/newer one — there is nothing left to race against.
+  ///
+  /// A listener that throws is reported through [FlutterError.reportError]: it
+  /// neither skips the remaining listeners nor leaves the controller unable to
+  /// fetch again.
   void fetch() {
     if (_fetchInFlight) {
       _fetchPending = true;
       return;
     }
-    _runFetch();
+    unawaited(_runFetch());
   }
 
   Future<void> _runFetch() async {
     _fetchInFlight = true;
-    for (var fn in _fetchListener) {
-      await Future.sync(fn);
+    try {
+      // Iterate over a snapshot: listeners may be added or removed while this
+      // loop is suspended on an await (a Gantt widget being disposed mid-fetch
+      // removes its own listener), which would otherwise throw a
+      // ConcurrentModificationError.
+      for (final fn in List<FutureOr<void> Function()>.of(_fetchListener)) {
+        try {
+          await Future.sync(fn);
+        } catch (error, stackTrace) {
+          // A listener that throws must not abort the remaining listeners nor
+          // leave the controller wedged, but the failure still has to surface.
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stackTrace,
+              library: 'flutter_gantt',
+              context: ErrorDescription(
+                'while running a GanttController fetch listener',
+              ),
+            ),
+          );
+        }
+      }
+    } finally {
+      _fetchInFlight = false;
     }
-    _fetchInFlight = false;
     if (_fetchPending) {
       _fetchPending = false;
       unawaited(_runFetch());
